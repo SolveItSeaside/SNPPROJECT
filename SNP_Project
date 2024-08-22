@@ -1,0 +1,785 @@
+'''
+SNP Investigation
+
+In this piece I am working towards a model that can predict changes in the SNP500 based on several macroeconomic indicators.
+
+This demonstrates understanding of financial markets as well as investigation into relationships using advanced statistical libaries in python. 
+
+The SNP500 is a popular ETF that allows traders and institutional investors to invest in a wide range of caompanies, all with good performance. 
+
+The benefit of this tends to be guaranteed, modest returns year on year however I'm eager to investigate ways that these can be increased. 
+
+There is lots of literature on relationships between interest rates and markets for instance so it would be interesting to see how they play out in reality. . 
+
+Please feel free to use the code and repurpose as you see fit. If you have any questions I would be happy to answer them. 
+
+
+Contents 
+Section 1: Data Collection and Cleaning 
+    - 1. Create the Dates Table
+    - 2. GET SPX500 Data using yfinance API
+    - 3. Join Dates table and SNP500 Data
+    - 4. Collect Fred Data 
+    - 5. Join Fred Data 
+
+Section 2: Exploratory Data Analysis
+    - 1. Overall Trend
+    - 2. Monthly Change
+    - 3. Correlation Analyis
+    - 4. Lagged Correlation Analysis
+
+Section 3: Regression Analysis
+    - 1. Unterest Rates with Lags
+    - 2. Unterest Rates with Lags Graphed
+    - 3. Exhaustive Search 
+    - 4. Best Fitting Model
+
+Section 4: Conclusion
+    - 1. Final Thoughts
+    - 2. Next Steps 
+
+
+'''
+
+
+# # # # # # # # # # # # # # # # SECTION 1:  Data Collection and Cleaning # # # # # # # # # # # # # # # # 
+# # # # # # # # # # # # # # # # SECTION 1:  Data Collection and Cleaning # # # # # # # # # # # # # # # # 
+# # # # # # # # # # # # # # # # SECTION 1:  Data Collection and Cleaning # # # # # # # # # # # # # # # # 
+
+
+
+import pandas as pd
+import yfinance as yf
+import ssl
+import certifi
+from fredapi import Fred
+import pandas as pd
+import numpy as np
+
+
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+#1: Create the Dates Table
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+
+start_date = '1984-01-03'
+end_date = '2024-01-01'
+
+dates = pd.date_range(start=start_date, end=end_date, freq='D')
+dates_table = pd.DataFrame({'Date': dates})
+
+# Add 'Months Since' and 'Days Since' columns to be used for joins
+dates_table['Months_Since'] = (dates_table['Date'].dt.to_period('M') - pd.Period(start_date, 'M')).apply(lambda x: x.n)
+dates_table['Days_Since'] = (dates_table['Date'] - pd.to_datetime(start_date)).dt.days
+
+print(dates_table.head())
+
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+#2: GET SPX500 Data using yfinance API
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+
+import yfinance as yf
+
+# GET S&P 500 Data
+spx_data = yf.download("^GSPC", start="1984-01-03", end="2024-01-01")
+spx_data.reset_index(inplace=True)
+spx_data.head()
+
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+#3: Join Dates table and SNP500 Data
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+
+combined_data = pd.merge(dates_table, spx_data, on='Date', how='left')
+
+# Forward-fill NaN values for non-trading days
+combined_data.fillna(method='ffill', inplace=True)
+
+combined_data.head()
+
+combined_data.head(100)
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+#4: COLLECT FRED DATA
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+
+'''
+This website is great you can collect data on macro indicators in the USA economy here 
+https://fred.stlouisfed.org/
+You can create an account and set uo an API key in 10 mins!!
+'''
+
+# Initialize FRED API
+fred = Fred(api_key='yourAPIkeyhere')
+
+# Set up SSL context to use certifi's certificates (optional)
+ssl_context = ssl.create_default_context(cafile=certifi.where())
+
+# Step 1: Download S&P 500 historical data from 1984 to the present
+spx_data = yf.download("^GSPC", start="1984-01-01", end="2024-01-01")
+
+# Step 2: Fetch the historical Federal Funds Rate data
+interest_rate_data = fred.get_series('FEDFUNDS', observation_start='1984-01-01', ssl_context=ssl_context)
+
+# Step 3: Fetch the historical CPI data (CPI for All Urban Consumers: All Items)
+cpi_data = fred.get_series('CPIAUCSL', observation_start='1984-01-01')
+
+# Step 4: Fetch the historical GDP data (Gross Domestic Product)
+gdp_data = fred.get_series('GDP', observation_start='1984-01-01')
+
+# Step 5: Fetch the historical Total Public Debt data
+debt_data = fred.get_series('GFDEBTN', observation_start='1984-01-01')
+
+# Step 6: Fetch the historical export data (Goods and Services)
+exports_data = fred.get_series('EXPGS', observation_start='1984-01-01')
+
+# Step 7: Fetch the historical import data (Goods and Services)
+imports_data = fred.get_series('IMPGS', observation_start='1984-01-01')
+
+# Step 8: Calculate the Debt-to-GDP ratio
+debt_to_gdp_ratio = (debt_data / gdp_data) * 100
+
+# Step 9: Calculate the Balance of Trade (Exports - Imports)
+balance_of_trade = exports_data - imports_data
+
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+#5: CLEAN FRED DATA 
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+
+'''
+Forward-fill (ffill): I've used this when the data should remain constant until the next observation. It's common in financial or economic time series like interest rates or CPI, where values don’t change every day.
+Interpolation: I've used this when the data changes gradually over time, such as GDP, debt, or ratios derived from these. Interpolation provides a smooth transition between known data points.
+'''
+
+interest_rate_data = interest_rate_data.resample('D').ffill()
+
+# CPI Data (forward-fill)
+cpi_data = cpi_data.resample('D').ffill()
+
+# GDP Data (interpolate)
+gdp_data = gdp_data.resample('D').interpolate(method='linear')
+debt_data = debt_data.resample('D').interpolate(method='linear')
+
+# Debt-to-GDP Ratio (interpolate)
+debt_to_gdp_ratio = debt_to_gdp_ratio.resample('D').interpolate(method='linear')
+
+# Balance of Trade (forward-fill)
+balance_of_trade = balance_of_trade.resample('D').ffill()
+
+interest_rate_data = interest_rate_data.to_frame(name='Interest_Rate')
+cpi_data = cpi_data.to_frame(name='CPI')
+gdp_data = gdp_data.to_frame(name='GDP')
+debt_to_gdp_ratio = debt_to_gdp_ratio.to_frame(name='Debt_to_GDP_Ratio')
+balance_of_trade = balance_of_trade.to_frame(name='Balance_of_Trade')
+
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+#5: JOIN FRED DATA 
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+
+
+interest_rate_data.reset_index(inplace=True)
+# Now you can merge using the 'Date' column
+combined_data = pd.merge(combined_data, interest_rate_data, on='Date', how='left')
+
+
+
+# Repeat the process for the other datasets
+cpi_data.reset_index(inplace=True)
+cpi_data.rename(columns={'index': 'Date'}, inplace=True)
+combined_data = pd.merge(combined_data, cpi_data, on='Date', how='left')
+
+gdp_data.reset_index(inplace=True)
+gdp_data.rename(columns={'index': 'Date'}, inplace=True)
+combined_data = pd.merge(combined_data, gdp_data, on='Date', how='left')
+
+debt_to_gdp_ratio.reset_index(inplace=True)
+debt_to_gdp_ratio.rename(columns={'index': 'Date'}, inplace=True)
+combined_data = pd.merge(combined_data, debt_to_gdp_ratio, on='Date', how='left')
+
+balance_of_trade.reset_index(inplace=True)
+balance_of_trade.rename(columns={'index': 'Date'}, inplace=True)
+combined_data = pd.merge(combined_data, balance_of_trade, on='Date', how='left')
+
+
+# Display the first few rows of the combined dataset
+print(combined_data.head())
+
+columns = combined_data.columns.tolist()
+print(columns)
+
+combined_data.columns = combined_data.columns.str.replace('_x', '').str.replace('_y', '')
+
+# Display the updated column names
+print(combined_data.columns.tolist())
+
+columns_to_drop = [ 'level_0_x', 'index', 'level_0_y']
+
+# Drop the columns from the DataFrame
+combined_data = combined_data.drop(columns=columns_to_drop)
+
+
+# Saving the combined_data DataFrame to a CSV file for easier reference in the future
+combined_data.to_csv('combined_macro_spx_data4.csv', index=False)
+
+# Displaying the first few rows of the DataFrame to the user
+print(combined_data.head())
+
+
+
+# # # # # # # # # # # # # # # # SECTION 2:  Exploratory Data Analysis # # # # # # # # # # # # # # # # 
+# # # # # # # # # # # # # # # # SECTION 2:  Exploratory Data Analysis # # # # # # # # # # # # # # # # 
+# # # # # # # # # # # # # # # # SECTION 2:  Exploratory Data Analysis # # # # # # # # # # # # # # # # 
+
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+# 1: OVERALL TREND 
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+
+combined_data = pd.read_csv('combined_macro_spx_data4.csv')
+
+print(combined_data.describe())
+
+
+'''
+We can see that all have the same count which is great and shows our joins worked 
+The mean of the interest rate sits significantly lower in the distribution than that of the SNP data as well as Debt and GDP
+This makes sense as, with inflation , those macro economic indicators increase over time.
+However interest rates are set by the central bank and if they were to increase over time it would not be viable. 
+'''
+
+combined_data[['Close', 'Interest_Rate', 'CPI', 'GDP', 'Debt_to_GDP_Ratio', 'Balance_of_Trade']].plot(subplots=True, figsize=(10, 15))
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+
+# Normalize the data to bring all variables to a similar scale
+normalized_data = combined_data.copy()
+for column in ['Close', 'Interest_Rate', 'CPI', 'GDP', 'Debt_to_GDP_Ratio', 'Balance_of_Trade']:
+    normalized_data[column] = (combined_data[column] - combined_data[column].min()) / (combined_data[column].max() - combined_data[column].min())
+
+# Plot normalized data
+normalized_data[['Close', 'Interest_Rate', 'CPI', 'GDP', 'Debt_to_GDP_Ratio', 'Balance_of_Trade']].plot(subplots=True, figsize=(10, 15))
+plt.show()
+
+
+'''
+Figure 2.1
+We can see that most macro indicators increase over time with their highest values towards today. 
+Some show a downtrend over time however such as Balance of trade, this is due to the inflated value ofboth imports and exports. 
+Also interst rates show a negative slope, these are controlled centrally and have often been used to increase spending in times of uncertainty. 
+'''
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+#2: MONTHLY CHANGE 
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+combined_data['Date'] = pd.to_datetime(combined_data['Date'])
+
+combined_data['Date_Column'] = combined_data['Date']
+
+combined_data.set_index('Date', inplace=True)
+# Resample to end of month and calculate the percentage change
+
+monthly_data = combined_data.resample('M').last()
+# Drop any non-numeric columns if they exist
+numeric_columns = monthly_data.select_dtypes(include=[float, int])
+
+# Calculate the percentage change
+monthly_pct_change = numeric_columns.pct_change() * 100  # Calculate percentage change
+
+import matplotlib.pyplot as plt
+
+# Plot the percentage changes with appropriate spacing and larger figure size
+fig, axes = plt.subplots(nrows=5, ncols=1, figsize=(12, 20))
+
+# Plot each of the monthly percentage change data
+axes[0].plot(monthly_pct_change.index, monthly_pct_change['Close'], color='blue')
+axes[0].set_title('S&P 500 Close (Monthly % Change)')
+
+axes[1].plot(monthly_pct_change.index, monthly_pct_change['Interest_Rate'], color='orange')
+axes[1].set_title('Federal Funds Rate (Monthly % Change)')
+
+axes[2].plot(monthly_pct_change.index, monthly_pct_change['CPI'], color='green')
+axes[2].set_title('CPI (Monthly % Change)')
+
+axes[3].plot(monthly_pct_change.index, monthly_pct_change['GDP'], color='red')
+axes[3].set_title('GDP (Monthly % Change)')
+
+axes[4].plot(monthly_pct_change.index, monthly_pct_change['Debt_to_GDP_Ratio'], color='purple')
+axes[4].set_title('Debt to GDP Ratio (Monthly % Change)')
+
+# Set spacing between plots
+plt.tight_layout(pad=5.0)
+
+# Display the plot
+plt.show()
+
+
+
+'''
+Figure 2.2. Monthly Change
+
+S&P 500 Close (Monthly % Change):
+
+The S&P 500 shows significant volatility, particularly around major market events (e.g., 2008 financial crisis, 2020 COVID-19 pandemic).
+This volatility might correlate with significant economic or financial disruptions.
+Federal Funds Rate (Monthly % Change):
+
+The Federal Funds Rate changes more sporadically, often in response to monetary policy decisions. Notice the sharp changes, particularly during periods of economic stress.
+There are noticeable periods where the rate is adjusted aggressively, possibly to combat inflation or stimulate the economy.
+CPI (Monthly % Change):
+
+CPI changes are relatively stable, reflecting gradual changes in inflation. However, sharp movements could indicate periods of economic instability or shocks.
+Look for correlations between sharp increases in CPI and S&P 500 volatility.
+GDP (Monthly % Change):
+
+GDP changes are generally steady but exhibit noticeable drops during economic downturns (e.g., 2008, 2020).
+These drops could correlate with significant movements in the S&P 500.
+Debt to GDP Ratio (Monthly % Change):
+
+The Debt to GDP Ratio tends to change gradually, but there are spikes during crises, such as the 2008 financial crisis and the 2020 pandemic.
+These spikes may correspond to increased government borrowing in response to economic downturns.
+'''
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+# 3: CORRELATIONS ANALYSIS 
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+
+
+correlations = monthly_pct_change.corr()
+print(correlations)
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Assuming correlations is your correlation matrix DataFrame
+plt.figure(figsize=(12, 8))
+sns.heatmap(correlations, annot=True, cmap='coolwarm')
+
+plt.show()
+
+'''
+Figure 2.3 Correlation Heatmap.
+
+Strong Correlations Among S&P 500 Metrics:
+
+The S&P 500 metrics (Open, High, Low, Close, Adj Close) show near-perfect correlations with each other, which is expected since they all represent different aspects of the same market data.
+
+Interest Rate:
+There’s a weak positive correlation between the Interest Rate and the S&P 500 metrics, suggesting that changes in the Federal Funds Rate do not strongly correlate with immediate changes in the S&P 500 on a monthly basis.
+The strongest correlation here is around 0.1 with the CPI, indicating a slight relationship between interest rate changes and inflation.
+
+CPI (Inflation):
+CPI shows a weak correlation with the S&P 500 metrics, similar to the Interest Rate.
+A noticeable correlation is with the Interest Rate (0.31), which is logical as interest rates are often adjusted in response to inflation.
+
+GDP:
+There’s a weak to moderate correlation between GDP and the S&P 500 metrics, with the highest correlation being around 0.22.
+This suggests that changes in GDP do have some relationship with market performance, but it may be lagged or influenced by other factors.
+
+Debt-to-GDP Ratio:
+The Debt-to-GDP Ratio shows a negative correlation with S&P 500 metrics, with values around -0.2. This suggests that as the debt ratio increases, there might be a negative impact on the market, though the correlation is not strong.
+
+Balance of Trade:
+The Balance of Trade shows a very weak or negligible correlation with the S&P 500 metrics, indicating that monthly changes in trade balance don’t directly influence the stock market in a clear way.
+'''
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+#4: LAGGED CORRELATIONS ANALYSIS 
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# Define lags
+lags = [1, 5, 10]  # Example lags in days
+
+# Create lagged variables
+for lag in lags:
+    combined_data[f'Interest_Rate_Lag_{lag}'] = combined_data['Interest_Rate'].shift(lag)
+    combined_data[f'CPI_Lag_{lag}'] = combined_data['CPI'].shift(lag)
+    combined_data[f'GDP_Lag_{lag}'] = combined_data['GDP'].shift(lag)
+
+# Calculate the correlation matrix
+lagged_corr = combined_data[['Close', 
+                             'Interest_Rate_Lag_1', 'Interest_Rate_Lag_5', 'Interest_Rate_Lag_10',
+                             'CPI_Lag_1', 'CPI_Lag_5', 'CPI_Lag_10',
+                             'GDP_Lag_1', 'GDP_Lag_5', 'GDP_Lag_10']].corr()
+
+
+
+# Plot the heatmap with rotated x-axis labels and adjusted figure size
+plt.figure(figsize=(12, 8))
+sns.heatmap(lagged_corr, annot=True, cmap='coolwarm', fmt=".2f")
+
+# Rotate the x-axis labels for better readability
+plt.xticks(rotation=45, ha='right')
+
+# Display the heatmap
+plt.tight_layout()  # Adjusts the plot to ensure everything fits without overlapping
+plt.show()
+
+
+'''
+Interest Rate Lags:
+The negative correlation between the Interest_Rate_Lag variables and the S&P 500 (Close) indicates that increases in interest rates are associated with a decrease in the S&P 500 over the subsequent days.
+
+CPI Lags:
+There's a strong positive correlation between the S&P 500 and CPI lags, suggesting that as CPI (a measure of inflation) increases, the S&P 500 also tends to increase over the following days or weeks. This could reflect the market's expectation of higher nominal growth in an inflationary environment.
+
+GDP Lags:
+A strong positive correlation is observed between GDP lags and the S&P 500, which makes sense since GDP growth is generally associated with better corporate earnings and thus higher stock prices.
+
+Interpretation:
+Interest Rate Impact: The negative correlation between lagged interest rates and the S&P 500 suggests that rising interest rates may lead to lower stock prices over time. This aligns with the typical economic theory that higher interest rates can reduce consumer spending and business investment, negatively impacting corporate profits and stock prices.
+
+CPI and GDP Impact: The positive correlation with CPI and GDP suggests that as these economic indicators improve (or as inflation rises), the S&P 500 also tends to perform better, possibly due to higher expected nominal growth.
+
+'''
+
+
+
+# # # # # # # # # # # # # # # # SECTION 3:  Regression Analysis # # # # # # # # # # # # # # # # 
+# # # # # # # # # # # # # # # # SECTION 3:  Regression Analysis # # # # # # # # # # # # # # # # 
+# # # # # # # # # # # # # # # # SECTION 3:  Regression Analysis # # # # # # # # # # # # # # # # 
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+#1: REGRESSION : Unterest Rates with Lags
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+
+import statsmodels.api as sm
+import numpy as np
+
+# Forward-fill the missing values
+
+# Prepare the dependent variable (S&P 500 Close returns)
+# Optionally, you can use percentage change to normalize the data
+combined_data['SP500_Return'] = combined_data['Close'].pct_change() * 100
+
+# Fill NaN values with 0
+combined_data['SP500_Return'].fillna(0, inplace=True)
+
+# Check the data to ensure no NaN values remain
+print(combined_data['SP500_Return'].isna().sum())
+
+Y = combined_data['Close']
+
+# Prepare the independent variables (Interest Rate and its lags)
+X = combined_data[['Interest_Rate', 'Interest_Rate_Lag_1', 'Interest_Rate_Lag_10']]
+
+# Add a constant to the model (intercept)
+X = sm.add_constant(X)
+
+X_clean = X.fillna(method='ffill')
+
+X.replace([np.inf, -np.inf], np.nan, inplace=True)
+
+# Forward-fill NaN values again
+X_clean = X.fillna(method='ffill')
+
+# Ensure there are no NaN or inf values remaining
+X_clean.fillna(0, inplace=True)
+
+# Fit the regression model
+model = sm.OLS(Y, X_clean).fit()
+print(model.summary())
+
+'''
+                            OLS Regression Results                            
+==============================================================================
+Dep. Variable:                  Close   R-squared:                       0.276
+Model:                            OLS   Adj. R-squared:                  0.276
+Method:                 Least Squares   F-statistic:                     1858.
+Date:                Thu, 22 Aug 2024   Prob (F-statistic):               0.00
+Time:                        14:00:44   Log-Likelihood:            -1.2086e+05
+No. Observations:               14609   AIC:                         2.417e+05
+Df Residuals:                   14605   BIC:                         2.418e+05
+Df Model:                           3                                         
+Covariance Type:            nonrobust                                         
+========================================================================================
+                           coef    std err          t      P>|t|      [0.025      0.975]
+----------------------------------------------------------------------------------------
+const                 2094.5502     12.334    169.817      0.000    2070.374    2118.727
+Interest_Rate          -44.9557     88.496     -0.508      0.611    -218.419     128.507
+Interest_Rate_Lag_1      0.9484     93.270      0.010      0.992    -181.872     183.769
+Interest_Rate_Lag_10  -155.0244     29.522     -5.251      0.000    -212.891     -97.158
+==============================================================================
+Omnibus:                     4182.807   Durbin-Watson:                   0.001
+Prob(Omnibus):                  0.000   Jarque-Bera (JB):            10245.259
+Skew:                           1.596   Prob(JB):                         0.00
+Kurtosis:                       5.577   Cond. No.                         130.
+
+Notes :
+
+It seems not all variables are significant here with some high p values aside from the 10 lag. 
+
+The model is overall significant with a low F stat however the low R value means it doesnt explain much of the movememnt.
+
+'''
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+# 2: REGRESSION : interest rates with lags graphs
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+
+import matplotlib.pyplot as plt
+
+# Calculate predicted values based on the regression model
+combined_data['Predicted_Close'] = model.predict(X_clean)
+
+# Plot actual vs. predicted S&P 500 Close values
+plt.figure(figsize=(14, 7))
+plt.plot(combined_data.index, combined_data['Close'], label='Actual Close', color='blue')
+plt.plot(combined_data.index, combined_data['Predicted_Close'], label='Predicted Close', color='red', linestyle='--')
+
+# Add labels and legend
+plt.title('Actual vs. Predicted S&P 500 Close Values')
+plt.xlabel('Date')
+plt.ylabel('S&P 500 Close Value')
+plt.legend()
+
+# Optionally, highlight specific dates or periods of interest
+# For example, you can highlight interest rate change dates if you have them
+# plt.axvline(x='2024-08-01', color='gray', linestyle=':', label='Interest Rate Change')
+
+plt.show()
+
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+# 3: Exhaustive Search 
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+
+'''
+Due to insignificant interest variables when looking at the effect on close I wanted to test % change too.
+
+However to test both % change and close on the Y, along with each interest rate lag and its % change, would take some time. 
+
+To combat this I performed an exhaustive search on all interest related variables to try and ascertain the model with most significant variables. 
+'''
+
+import pandas as pd
+import itertools
+import statsmodels.api as sm
+from tqdm import tqdm  # Progress bar library
+import math
+
+
+# Assuming combined_data is your DataFrame
+columns = ['Interest_Rate']  # We'll calculate Interest_Rate_Pct_Change below
+lags = [1, 5, 10, 20]
+lagged_variables = []
+
+# Step 1: Calculate the percentage change for Interest Rate
+combined_data['Interest_Rate_Pct_Change'] = combined_data['Interest_Rate'].pct_change() * 100
+
+# Add the percentage change column to the columns list
+columns.append('Interest_Rate_Pct_Change')
+
+# Step 2: Generate lagged variables for interest rates and their percentage changes
+for column in columns:
+    for lag in lags:
+        combined_data[f'{column}_Lag_{lag}'] = combined_data[column].shift(lag)
+        lagged_variables.append(f'{column}_Lag_{lag}')
+
+# Step 3: Prepare the dependent variables (Close and SP500_Pct_Change)
+Y_close = combined_data['Close']
+Y_pct_change = combined_data['SP500_Return']
+
+# Step 4: Calculate total combinations
+total_combinations = sum(math.comb(len(lagged_variables), k) for k in range(1, len(lagged_variables) + 1))
+print(f'Total combinations to process: {total_combinations}')
+
+# Step 5: Initialize progress bar
+progress_bar = tqdm(total=total_combinations)
+
+# Step 6: Automate model testing with progress bar
+results = []
+combination_count = 0
+
+# Function to run the model for a given Y (dependent variable)
+def run_model(Y, dependent_variable_name):
+    global combination_count
+    for L in range(1, len(lagged_variables) + 1):
+        for subset in itertools.combinations(lagged_variables, L):
+            combination_count += 1
+            # Define the independent variables for the model
+            X = combined_data[list(subset)].dropna()
+            X = sm.add_constant(X)  # Add a constant (intercept) to the model
+            Y_subset = Y.loc[X.index]  # Align Y with X after dropping NaN
+            # Fit the OLS regression model
+            model = sm.OLS(Y_subset, X).fit()
+            # Only store results if all p-values are below 0.05
+            if all(p < 0.05 for p in model.pvalues):
+                results.append({
+                    'dependent_variable': dependent_variable_name,
+                    'variables': subset,
+                    'R_squared': model.rsquared,
+                    'p-values': model.pvalues.to_dict(),  # Convert p-values to a dictionary for clarity
+                    'AIC': model.aic
+                })
+            # Update the progress bar
+        progress_bar.update(1)
+
+# Run models for both dependent variables (Close and SP500_Pct_Change)
+run_model(Y_close, 'Close')
+run_model(Y_pct_change, 'SP500_Pct_Change')
+
+# Close the progress bar
+progress_bar.close()
+
+# Step 7: Convert results to DataFrame, filter for significance, and sort by R_squared
+results_df = pd.DataFrame(results)
+results_df = results_df.sort_values(by='R_squared', ascending=False)
+
+# Display top results with all p-values < 0.05
+print(results_df[['dependent_variable', 'variables', 'R_squared', 'p-values', 'AIC']].head())
+results_df.to_csv('significant_regression_results2.csv', index=False)
+
+# Display top results
+print(results_df[['dependent_variable', 'variables', 'R_squared', 'p-values', 'AIC']].head())
+
+'''
+Results were 
+
+    dependent_variable                                          variables  R_squared                                           p-values            AIC
+171              Close  (Interest_Rate_Lag_1, Interest_Rate_Lag_20, In...   0.299976  {'const': 0.0, 'Interest_Rate_Lag_1': 1.396313...  166107.603894
+151              Close  (Interest_Rate_Lag_1, Interest_Rate_Lag_20, In...   0.299370  {'const': 0.0, 'Interest_Rate_Lag_1': 1.234645...  166114.304576
+152              Close  (Interest_Rate_Lag_1, Interest_Rate_Lag_20, In...   0.299369  {'const': 0.0, 'Interest_Rate_Lag_1': 1.145735...  166114.310144
+150              Close  (Interest_Rate_Lag_1, Interest_Rate_Lag_20, In...   0.299362  {'const': 0.0, 'Interest_Rate_Lag_1': 1.203124...  166114.421133
+105              Close  (Interest_Rate_Lag_1, Interest_Rate_Lag_20, In...   0.298779  {'const': 0.0, 'Interest_Rate_Lag_1': 9.327976...  166120.778866
+
+
+we decided to build the model with the higest R2 that also had all significant variables
+'''
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+# 4: Best Fitting Model 
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+
+
+import matplotlib.pyplot as plt
+import statsmodels.api as sm
+
+print(X.isna().sum())  # Check for NaNs
+print(np.isinf(X).sum())  # Check for infinities
+
+
+# Define the dependent variable
+Y = combined_data['Close']
+
+# Define the independent variables (lags)
+X = combined_data[['Interest_Rate_Lag_1', 'Interest_Rate_Lag_20', 
+                   'Interest_Rate_Pct_Change_Lag_1', 
+                   'Interest_Rate_Pct_Change_Lag_5', 
+                   'Interest_Rate_Pct_Change_Lag_10', 
+                   'Interest_Rate_Pct_Change_Lag_20']]
+
+# Add a constant (intercept) to the model
+X = sm.add_constant(X)
+# Remove rows with NaN or infinite values
+X_clean = X.replace([np.inf, -np.inf], np.nan).dropna()
+
+# Ensure Y is aligned with X_clean
+Y_clean = Y.loc[X_clean.index]
+
+# Now fit the model
+model = sm.OLS(Y_clean, X_clean).fit()
+print(model.summary())
+
+
+'''
+                           OLS Regression Results                            
+==============================================================================
+Dep. Variable:                  Close   R-squared:                       0.291
+Model:                            OLS   Adj. R-squared:                  0.291
+Method:                 Least Squares   F-statistic:                     997.8
+Date:                Thu, 22 Aug 2024   Prob (F-statistic):               0.00
+Time:                        14:22:26   Log-Likelihood:            -1.2053e+05
+No. Observations:               14588   AIC:                         2.411e+05
+Df Residuals:                   14581   BIC:                         2.411e+05
+Df Model:                           6                                         
+Covariance Type:            nonrobust                                         
+===================================================================================================
+                                      coef    std err          t      P>|t|      [0.025      0.975]
+---------------------------------------------------------------------------------------------------
+const                            2092.0906     12.220    171.196      0.000    2068.137    2116.044
+Interest_Rate_Lag_1               538.8791     45.530     11.836      0.000     449.634     628.124
+Interest_Rate_Lag_20             -736.3097     45.432    -16.207      0.000    -825.363    -647.257
+Interest_Rate_Pct_Change_Lag_1      8.3159      2.709      3.070      0.002       3.006      13.626
+Interest_Rate_Pct_Change_Lag_5      8.2508      2.709      3.046      0.002       2.941      13.561
+Interest_Rate_Pct_Change_Lag_10     7.6835      2.709      2.836      0.005       2.373      12.994
+Interest_Rate_Pct_Change_Lag_20    13.0691      2.692      4.854      0.000       7.792      18.346
+==============================================================================
+Omnibus:                     4007.712   Durbin-Watson:                   0.008
+Prob(Omnibus):                  0.000   Jarque-Bera (JB):             9496.456
+Skew:                           1.547   Prob(JB):                         0.00
+Kurtosis:                       5.460   Cond. No.                         54.5
+==============================================================================
+
+We have a robust model here. All variables have significant p values as well as the overall F stat.
+R2 is close to .3 which is higher than the initial model we built.
+In this model we have increased variable significance while also increasing R2. 
+
+'''
+
+# Generate predictions
+predictions = model.predict(X)
+
+# Plot the actual vs predicted values
+plt.figure(figsize=(10, 6))
+plt.plot(combined_data.index, Y, label='Actual Close', color='blue')
+plt.plot(combined_data.index, predictions, label='Predicted Close', color='red', linestyle='--')
+plt.title('Actual vs. Predicted S&P 500 Close Values')
+plt.xlabel('Date')
+plt.ylabel('S&P 500 Close Value')
+plt.legend()
+plt.show()
+
+
+
+
+# # # # # # # # # # # # # # # # SECTION 4:  Conclusion # # # # # # # # # # # # # # # # 
+# # # # # # # # # # # # # # # # SECTION 4:  Conclusion # # # # # # # # # # # # # # # # 
+# # # # # # # # # # # # # # # # SECTION 4:  Conclusion # # # # # # # # # # # # # # # # 
+
+
+
+'''
+<><><><> 1. Final Thoughts <><><><><><><>
+This investigation provides a comprehensive analysis of the relationship between the S&P 500 and various 
+macroeconomic indicators. By using data collection, cleaning, and exploratory data analysis, we've gained a 
+deeper understanding of how factors like interest rates, GDP, and CPI may influence market performance.
+
+The regression analysis, particularly the use of lags and exhaustive search, has highlighted that while some variables 
+show significant effects, the overall explanatory power (R-squared) of the models remains moderate. This suggests 
+that while interest rates do play a role in the movement of the S&P 500, there are likely other factors,
+such as other macroeconomic indicators,  market sentiment, global events, and sector-specific trends, that contribute to market movements.
+
+
+
+
+
+<><><><> 2. Next Steps <><><><><><><>
+Expand the Set of Predictors: Consider including additional macroeconomic 
+indicators or even market-specific data, such as earnings reports or sector 
+performance, to potentially improve the model's R-squared value.
+
+Test Non-Linear Models: The relationship between the S&P 500 and macroeconomic 
+indicators may not be strictly linear. Exploring non-linear models, such as polynomial 
+regressions or machine learning models (e.g., Random Forests, Gradient Boosting Machines), 
+could help capture more complex relationships.
+
+Incorporate Lagged Dependent Variables: Adding lagged values of the S&P 500 itself might 
+improve model performance by accounting for autocorrelation in the data.
+
+Out-of-Sample Testing: While the model performs well on the available data, it's important 
+to test its predictive power on out-of-sample data (e.g., using data from 2024 onwards) to validate its robustness.
+
+Consider Economic Regimes: The relationship between the S&P 500 and macroeconomic indicators
+may vary during different economic regimes (e.g., recessions vs. expansions). Segmenting the data by such regimes and building regime-specific models could lead to more accurate predictions.
+
+
+
+'''
